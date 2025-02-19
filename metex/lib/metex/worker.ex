@@ -1,5 +1,14 @@
 defmodule Metex.Worker do
 
+  def loop do
+    receive do
+      {sender_pid, location} ->
+        send(sender_pid, {:ok, temperature_of(location)})
+      _ -> "Don't know how to process this mesage"
+    end
+    loop()
+  end
+
   def temperature_of(location) do
     result = url_for(location) |> HTTPoison.get |> parse_response
     case result do
