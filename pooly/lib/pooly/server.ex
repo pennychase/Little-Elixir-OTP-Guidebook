@@ -6,7 +6,7 @@ defmodule Pooly.Server do
   @name __MODULE__
 
   defmodule State do
-    defstruct sup: nil, size: nil, mfa: nil
+    defstruct sup: nil, size: nil,  mfa: nil, monitors: nil, workers: nil, worker_sup: nil
   end
 
   #########
@@ -17,12 +17,25 @@ defmodule Pooly.Server do
     GenServer.start_link(__MODULE__, [sup, pool_config], name: @name)
   end
 
+  def checkout do
+    GenServer.call(@name, :checkout)
+  end
+
+  def checkin(worker) do
+    GenServer.cast(@name, {:checkin, worker})
+  end
+
+  def status do
+    GenServer.call(@name, :status)
+  end
+
   ###############
   ## Callbacks ##
   ###############
 
   def init([sup, pool_config]) when is_pid(sup) do
-    init(pool_config, %State{sup: sup})
+    monitors = :ets.new(:monitors, [:private])
+    init(pool_config, %State{sup: sup, monitors: monitors})
   end
 
   def init([{:mfa, mfa} | rest], state) do
@@ -38,7 +51,7 @@ defmodule Pooly.Server do
   end
 
   def init([], state) do
-    send(self, :start_worker_supervisor)
+    send(self(), :start_worker_supervisor)
     {:ok, state}
   end
 
@@ -48,12 +61,39 @@ defmodule Pooly.Server do
     {:noreply, %{state | worker_sup: worker_sup, workers: workers}}
   end
 
+  def handle_call(:checkout, {from_pid, _ref}, %{workers: workers, monitors: monitors} = state) do
+    case workers do
+      [worker|rest] ->
+        ref = Process.monitor(from_pid)
+        true = :ets.insert(monitors, {worker, ref})
+        {:reply, worker, %{state | workers: rest}}
+      [] ->
+        {:reply, :noproc, state}
+    end
+  end
+
+  def handle_call(:status, _from, %{workers: workers, monitors: monitors} = state) do
+    {:reply, {length(workers), :ets.info(monitors, :size)}, state}
+    
+  end
+
+  def handle_cast({:checkin, worker}, %{workers: workers, monitors: monitors} = state) do
+    case :ets.lookup(monitors, worker) do
+      [{pid, ref}] ->
+        true = Process.demonitor(ref)
+        true = :ets.delete(monitors, pid)
+        {:noreply, %{state | workers: [pid|workers]}}
+      [] ->
+        {:noreply, state}
+    end
+  end
+
   #######################
   ## Private Functions ##
   #######################
 
   defp superviser_spec(mfa) do
-    opts = [restart: :termporary]
+    opts = [restart: :temporary]
     supervisor(Pooly.WorkerSupervisor, [mfa, opts])
   end
 
