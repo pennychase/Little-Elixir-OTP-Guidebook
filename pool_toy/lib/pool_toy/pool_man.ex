@@ -4,7 +4,9 @@ defmodule PoolToy.PoolMan do
   as a GenServer so it can maintain its state.
   """
 
-  @name = __MODULE__
+  use GenServer
+
+  @name __MODULE__
 
   #########
   ## API ##
