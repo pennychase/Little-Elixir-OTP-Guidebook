@@ -7,7 +7,6 @@ defmodule PoolToy.PoolSup do
   processes are killed before restarting (to ensure that all the workers are
   valid processes).
   """
-
   use Supervisor
 
   @name __MODULE__
@@ -30,8 +29,9 @@ defmodule PoolToy.PoolSup do
 
     children =
       [
-         {PoolToy.PoolMan, pool_size},
-         PoolToy.WorkerSup
+        PoolToy.WorkerSup,
+        {PoolToy.PoolMan, pool_size}
+
       ]
 
     Supervisor.init(children, strategy: :one_for_all)
