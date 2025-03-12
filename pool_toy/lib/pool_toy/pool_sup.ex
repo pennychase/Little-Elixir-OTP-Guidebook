@@ -9,14 +9,12 @@ defmodule PoolToy.PoolSup do
   """
   use Supervisor
 
-  @name __MODULE__
-
   #########
   ## API ##
   #########
 
   def start_link(args) do
-    Supervisor.start_link(__MODULE__, args, name: @name)   
+    Supervisor.start_link(__MODULE__, args)   
   end
 
   ###############
@@ -24,14 +22,10 @@ defmodule PoolToy.PoolSup do
   ###############
 
   def init(args) do
-    pool_size = args 
-                |> Keyword.fetch!(:size)
 
     children =
       [
-        PoolToy.WorkerSup,
-        {PoolToy.PoolMan, pool_size}
-
+        {PoolToy.PoolMan, [{:pool_sup, self()} | args]}
       ]
 
     Supervisor.init(children, strategy: :one_for_all)

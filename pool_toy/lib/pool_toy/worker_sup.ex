@@ -3,16 +3,14 @@ defmodule PoolToy.WorkerSup do
   WorkerSup supervises the worker pool. It is implmented as a
   DynamicSupervisor, so the workers can be created dynamically.
   """
-  use DynamicSupervisor
-
-  @name __MODULE__
+  use DynamicSupervisor, restart: :temporary
 
   #########
   ## API ##
   #########
 
   def start_link(args) do
-    DynamicSupervisor.start_link(__MODULE__, args, name: @name)
+    DynamicSupervisor.start_link(__MODULE__, args)
   end
 
  defdelegate start_worker(sup, spec), to: DynamicSupervisor, as: :start_child
