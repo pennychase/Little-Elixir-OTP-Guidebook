@@ -9,6 +9,8 @@ defmodule PoolToy.PoolMan do
     defstruct [ 
       :name, :size, :pool_sup, 
       :monitors, :worker_sup, :worker_spec,
+      :max_overflow,
+      overflow: 0,
       workers: [] ]
   end
 
@@ -55,6 +57,14 @@ defmodule PoolToy.PoolMan do
 
   defp init([{:size, _size} | _], _state) do
     {:stop, {:invalid_args, {:size, "must be a positive integer"}}}
+  end
+
+  defp init([{:max_overflow, max_overflow} | rest], %State{} = state) when is_integer(max_overflow) and max_overflow >= 0 do
+    init(rest, %{state | max_overflow: max_overflow})
+  end
+
+  defp init([{:max_overflow, _max_overflow} | _], _state) do
+    {:stop, {:invalid_args, {:max_overflow, "must be a non-negative integer"}}}
   end
 
   defp init([{:worker_spec, spec} | rest], %State{} = state) do
@@ -106,18 +116,26 @@ defmodule PoolToy.PoolMan do
     {:noreply, state}
   end
 
-  def handle_call(:checkout, _from, %State{workers: []} = state) do  
-    {:reply, :full, state}
-  end
-
   def handle_call(:checkout, {from, _}, %State{workers: [worker | rest]} = state) do
     %State{monitors: monitors} = state
     monitor(monitors, {worker, from})
     {:reply, worker, %{ state | workers: rest}}
   end
 
+  def handle_call(:checkout, {from, _}, %State{workers: [], max_overflow: max_overflow, overflow: overflow} = state) 
+                  when max_overflow > 0 and overflow < max_overflow do  
+    %State{worker_sup: sup, worker_spec: spec, monitors: monitors} = state
+    worker = new_worker(sup, spec)
+    monitor(monitors, {worker, from})
+    {:reply, worker, %{ state | overflow: overflow + 1}}
+  end
+
+  def handle_call(:checkout, _from, %State{workers: []} = state) do  
+    {:reply, :full, state}
+  end
+
   def handle_call(:status, _from, %State{monitors: monitors, workers: workers} = state) do
-    {:reply, "available: #{length(workers)}, busy: #{:ets.info(monitors, :size)}", state}
+    {:reply, "status: #{state_name(state)}, available: #{length(workers)}, busy: #{:ets.info(monitors, :size)}", state}
   end
 
   def handle_cast({:checkin, worker}, %State{monitors: monitors} = state) do
@@ -185,18 +203,37 @@ defmodule PoolToy.PoolMan do
     pid
   end
 
+  defp dismiss_worker(sup, pid) do
+    true = Process.unlink(pid)
+    PoolToy.WorkerSup.terminate_child(sup, pid)
+  end
+
   defp monitor(monitors, {worker, client}) do
     ref = Process.monitor(client)
     :ets.insert(monitors, {worker, ref})
   end
 
-  defp handle_idle_worker(%State{workers: workers} = state, idle_worker) when is_pid(idle_worker) do
-    %{state | workers: [ idle_worker | workers]}
+  defp handle_idle_worker(%State{workers: workers, worker_sup: sup, overflow: overflow} = state, idle_worker) when is_pid(idle_worker) do
+    if overflow > 0 do    # dynamically created worker
+      :ok = dismiss_worker(sup, idle_worker)
+      %{state | overflow: overflow - 1}
+    else
+      %{state | workers: [ idle_worker | workers], overflow: 0}
+    end
   end
 
-  def handle_worker_exit(%State{workers: workers, worker_sup: sup, worker_spec: spec} = state, pid) do
-    w = workers |> Enum.reject(&(&1 == pid))
-    %{state | workers: [new_worker(sup, spec) | w]}
+  defp handle_worker_exit(%State{workers: workers, worker_sup: sup, worker_spec: spec, overflow: overflow} = state, pid) do
+    if overflow > 0 do
+      %{state | overflow: overflow - 1}
+    else
+      w = workers |> Enum.reject(&(&1 == pid))
+     %{state | workers: [new_worker(sup, spec) | w]}
+    end
   end
 
+  defp state_name(%State{workers: [], max_overflow: 0}), do: :full
+  defp state_name(%State{workers: [], max_overflow: max_overflow, overflow: max_overflow}), do: :full
+  defp state_name(%State{workers: [], max_overflow: max_overflow, overflow: overflow}) when overflow < max_overflow, do: :overflow
+  defp state_name(_state), do: :ready
+   
 end

@@ -14,6 +14,8 @@ defmodule PoolToy.WorkerSup do
   end
 
  defdelegate start_worker(sup, spec), to: DynamicSupervisor, as: :start_child
+
+ defdelegate terminate_child(sup, pid), to: DynamicSupervisor, as: :terminate_child
  
   ###############
   ## Callbacks ##
