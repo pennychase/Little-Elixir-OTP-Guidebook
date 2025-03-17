@@ -5,14 +5,16 @@ defmodule PoolToy.PoolMan do
   """
   use GenServer
 
+
   defmodule State do
     defstruct [ 
       :name, :size, :pool_sup, 
       :monitors, :worker_sup, :worker_spec,
-      :max_overflow,
+      :max_overflow, :waiting,
       overflow: 0,
       workers: [] ]
   end
+
 
 
   #########
@@ -24,8 +26,8 @@ defmodule PoolToy.PoolMan do
     GenServer.start_link(__MODULE__, args, name: name)
   end
 
-  def checkout(pool) do
-    GenServer.call(pool, :checkout)
+  def checkout(pool, block, timeout) do
+    GenServer.call(pool, {:checkout, block}, timeout)
   end
 
   def checkin(pool, worker) do
@@ -94,7 +96,8 @@ defmodule PoolToy.PoolMan do
   defp init(_args, %State{name: name, size: _size} = state) do
     Process.flag(:trap_exit, true)
     monitors = :ets.new(:"monitors_#{name}", [:protected, :named_table])
-    {:ok, %{state |  monitors: monitors}, {:continue, :start_worker_sup}}
+    waiting = :queue.new()
+    {:ok, %{state |  monitors: monitors, waiting: waiting}, {:continue, :start_worker_sup}}
   end
 
   defp init([_ | t], state), do: init(t, state)
@@ -116,13 +119,13 @@ defmodule PoolToy.PoolMan do
     {:noreply, state}
   end
 
-  def handle_call(:checkout, {from, _}, %State{workers: [worker | rest]} = state) do
+  def handle_call({:checkout, _block}, {from, _}, %State{workers: [worker | rest]} = state) do
     %State{monitors: monitors} = state
     monitor(monitors, {worker, from})
     {:reply, worker, %{ state | workers: rest}}
   end
 
-  def handle_call(:checkout, {from, _}, %State{workers: [], max_overflow: max_overflow, overflow: overflow} = state) 
+  def handle_call({:checkout, _block}, {from, _}, %State{workers: [], max_overflow: max_overflow, overflow: overflow} = state) 
                   when max_overflow > 0 and overflow < max_overflow do  
     %State{worker_sup: sup, worker_spec: spec, monitors: monitors} = state
     worker = new_worker(sup, spec)
@@ -130,12 +133,18 @@ defmodule PoolToy.PoolMan do
     {:reply, worker, %{ state | overflow: overflow + 1}}
   end
 
-  def handle_call(:checkout, _from, %State{workers: []} = state) do  
+  def handle_call({:checkout, block}, {from, _}, %State{workers: [], waiting: waiting} = state) when block == true do  
+    ref = Process.monitor(from)
+    waiting = :queue.in({from, ref}, waiting)
+    {:noreply, %{state | waiting: waiting}, :infinity}
+  end
+
+  def handle_call({:checkout, _block}, _from, %State{workers: []} = state) do  
     {:reply, :full, state}
   end
 
-  def handle_call(:status, _from, %State{monitors: monitors, workers: workers} = state) do
-    {:reply, "status: #{state_name(state)}, available: #{length(workers)}, busy: #{:ets.info(monitors, :size)}", state}
+  def handle_call(:status, _from, %State{monitors: monitors, workers: workers, waiting: waiting} = state) do
+    {:reply, "status: #{state_name(state)}, free: #{length(workers)}, busy: #{:ets.info(monitors, :size)}, queue: #{:queue.len(waiting)}", state}
   end
 
   def handle_cast({:checkin, worker}, %State{monitors: monitors} = state) do
@@ -213,21 +222,37 @@ defmodule PoolToy.PoolMan do
     :ets.insert(monitors, {worker, ref})
   end
 
-  defp handle_idle_worker(%State{workers: workers, worker_sup: sup, overflow: overflow} = state, idle_worker) when is_pid(idle_worker) do
-    if overflow > 0 do    # dynamically created worker
-      :ok = dismiss_worker(sup, idle_worker)
-      %{state | overflow: overflow - 1}
-    else
-      %{state | workers: [ idle_worker | workers], overflow: 0}
+  defp handle_idle_worker(state, idle_worker) when is_pid(idle_worker) do
+    %State{workers: workers, worker_sup: sup, overflow: overflow, waiting: waiting, monitors: monitors} = state
+
+    case :queue.out(waiting) do
+      {{:value, {from, ref}}, rest} ->
+        true = :ets.insert(monitors, {idle_worker, ref})
+        GenServer.reply(from, idle_worker)
+        %{state | waiting: rest}
+      {:empty, empty} when overflow > 0 ->
+        :ok = dismiss_worker(sup, idle_worker)
+        %{state | waiting: empty, overflow: overflow - 1}
+      {:empty, empty} ->
+        %{state | waiting: empty, workers: [ idle_worker | workers], overflow: 0}
     end
+
   end
 
-  defp handle_worker_exit(%State{workers: workers, worker_sup: sup, worker_spec: spec, overflow: overflow} = state, pid) do
-    if overflow > 0 do
-      %{state | overflow: overflow - 1}
-    else
-      w = workers |> Enum.reject(&(&1 == pid))
-     %{state | workers: [new_worker(sup, spec) | w]}
+  defp handle_worker_exit(state, pid) do
+    %State{workers: workers, worker_sup: sup, worker_spec: spec, overflow: overflow, waiting: waiting, monitors: monitors} = state
+
+    case :queue.out(waiting) do
+      {{:value, {from, ref}}, rest} ->
+        new_worker = new_worker(sup, spec)
+        true = :ets.insert(monitors, {new_worker, ref})
+        GenServer.reply(from, new_worker)
+        %{state | waiting: rest}
+      {:empty, empty} when overflow > 0 ->
+        %{state | waiting: empty, overflow: overflow - 1}
+      {:empty, empty} ->
+        ws = workers |> Enum.reject(&(&1 == pid))
+        %{state | waiting: empty, workers: [new_worker(sup, spec) | ws]}
     end
   end
 
