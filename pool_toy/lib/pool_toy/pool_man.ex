@@ -133,8 +133,8 @@ defmodule PoolToy.PoolMan do
     {:reply, worker, %{ state | overflow: overflow + 1}}
   end
 
-  def handle_call({:checkout, block}, {from, _}, %State{workers: [], waiting: waiting} = state) when block == true do  
-    ref = Process.monitor(from)
+  def handle_call({:checkout, block}, {from_pid, _} = from, %State{workers: [], waiting: waiting} = state) when block == true do  
+    ref = Process.monitor(from_pid)
     waiting = :queue.in({from, ref}, waiting)
     {:noreply, %{state | waiting: waiting}, :infinity}
   end
