@@ -1,21 +1,14 @@
 # Blitzy
 
-**TODO: Add description**
+#### Blitzy.Caller
 
-## Installation
+Implements blizty with processes. Instead of modifying Blitzy.Worker to know the
+caller process and send the results back, added the parallel map from _Programing Elixir_:
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `blitzy` to your list of dependencies in `mix.exs`:
+- The spawn argument function wraps a send around the "real" function, that goes to the process spawning the worker processes
+- The function to the Enum.map that receives the results takes a process id (of the spawned process) as an argument, matches on it, and returns the message
 
-```elixir
-def deps do
-  [
-    {:blitzy, "~> 0.1.0"}
-  ]
-end
-```
+#### Blitzy.run (defined in lib/blitzy.ex)
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/blitzy>.
+Implements blitzy with Tasks.
 
