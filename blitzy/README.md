@@ -12,9 +12,9 @@ caller process and send the results back, added the parallel map from _Programin
 
 Implements blitzy with Tasks.
 
-#### Blitz.CLI
+#### Blitzy.CLI
 
-Implements a CLI application that uses Tasks with a Task supervision tree. Except it doesn't work as a CLI. Apparently tzdata versions after 0.5 are incompatible with escripts (an incompatibility with ETS). But you can run it within IEx, after setting up the three slave nodes:
+Implements a CLI application that uses Tasks with a Task supervision tree. Except it doesn't work as a CLI. Apparently tzdata versions after 0.5 are incompatible with escripts (an incompatibility with ETS). But you can run it within IEx, after setting up the three worker nodes:
 ```elixir
 Blitzy.CLI.main(["-n", "10", "http://www.bieberfever.com"]) 
 ```

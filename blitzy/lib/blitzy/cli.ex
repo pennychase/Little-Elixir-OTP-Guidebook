@@ -4,10 +4,10 @@ defmodule Blitzy.CLI do
 
     def main(args) do
 
-      Application.get_env(:blitzy, :master_node)
+      Application.get_env(:blitzy, :manager_node)
       |> Node.start()
 
-      Application.get_env(:blitzy, :slave_nodes)
+      Application.get_env(:blitzy, :worker_nodes)
       |> Enum.each(&Node.connect(&1))
 
       args
@@ -19,7 +19,7 @@ defmodule Blitzy.CLI do
       OptionParser.parse(args, aliases: [n: :requests], strict: [requests: :integer])
     end
 
-    def process_options(options, nodes) do
+    defp process_options(options, nodes) do
       case options do
         {[requests: n], [url], []} ->
           do_requests(n, url, nodes)
