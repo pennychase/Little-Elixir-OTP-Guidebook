@@ -3,16 +3,17 @@ defmodule Blitzy do
   `Blitzy` provides convenience functions to run workers and generate statistics.
   """
 
- def run(n_workers, url) when n_workers > 0 do
+  def run(n_workers, url) when n_workers > 0 do
 
     worker_fun = fn -> Blitzy.Worker.start(url) end
 
     1..n_workers
       |> Enum.map(fn _ -> Task.async(worker_fun) end)
       |> Enum.map(&Task.await(&1, :infinity))
+      |> parse_results
   end
 
-  def stats(results) do
+  def parse_results(results) do
     {successes, _failures} =
       results |> Enum.split_with(fn x ->
         case x do

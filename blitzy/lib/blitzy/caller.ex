@@ -8,7 +8,7 @@ defmodule Blitzy.Caller do
                 spawn(fn -> (send me, {self(), Blitzy.Worker.start(url)}) end)
             end)
         |> Enum.map(fn pid->
-                receive do {^pid, x }-> x end
+                receive do {^pid, x } -> x end
            end)   
     end
     
